@@ -9,12 +9,14 @@ import {
   Sparkles,
   Lightbulb,
   Command,
+  Youtube,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
   { name: "Swipe File", href: "/swipe-file", icon: Bookmark },
+  { name: "Transcripts", href: "/transcripts", icon: Youtube },
   { name: "Breakdown", href: "/breakdown", icon: Sparkles },
   { name: "Newsletters", href: "/newsletters", icon: FileText },
   { name: "Ideas", href: "/ideas", icon: Lightbulb },

@@ -93,4 +93,19 @@ export default defineSchema({
     tacticsUsed: v.array(v.string()),
     generatedAt: v.number(),
   }).index("by_swipeItem", ["swipeItemId"]),
+
+  transcripts: defineTable({
+    videoId: v.string(),
+    videoUrl: v.string(),
+    title: v.string(),
+    channelName: v.optional(v.string()),
+    duration: v.optional(v.string()),
+    thumbnail: v.optional(v.string()),
+    transcript: v.string(),
+    language: v.optional(v.string()),
+    swipeItemId: v.optional(v.id("swipeItems")),
+    createdAt: v.number(),
+  })
+    .index("by_videoId", ["videoId"])
+    .index("by_swipeItem", ["swipeItemId"]),
 });
