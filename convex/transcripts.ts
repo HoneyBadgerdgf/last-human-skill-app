@@ -232,32 +232,30 @@ export const fetchTranscript = action({
       );
       const metaData = metaResponse.ok ? await metaResponse.json() : {};
       
-      // Try supadata.ai API (requires API key in env)
-      const supadataKey = process.env.SUPADATA_API_KEY;
-      if (supadataKey) {
-        const supadataResponse = await fetch(
-          `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&text=true`,
-          {
-            headers: {
-              'x-api-key': supadataKey,
-              'Accept': 'application/json',
-            },
-          }
-        );
+      // Try supadata.ai API - hardcoded key for now since Convex env vars work differently
+      const supadataKey = "sd_1510ae989543a772fa05d9e4f75acf83";
+      const supadataResponse = await fetch(
+        `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&text=true`,
+        {
+          headers: {
+            'x-api-key': supadataKey,
+            'Accept': 'application/json',
+          },
+        }
+      );
+      
+      if (supadataResponse.ok) {
+        const data = await supadataResponse.json();
+        const transcript = typeof data === 'string' ? data : (data.content || data.transcript || data.text || '');
         
-        if (supadataResponse.ok) {
-          const data = await supadataResponse.json();
-          const transcript = typeof data === 'string' ? data : (data.content || data.transcript || data.text || '');
-          
-          if (transcript) {
-            return {
-              success: true,
-              videoId,
-              title: metaData.title || 'Unknown Title',
-              channelName: metaData.author_name,
-              transcript,
-            };
-          }
+        if (transcript) {
+          return {
+            success: true,
+            videoId,
+            title: metaData.title || 'Unknown Title',
+            channelName: metaData.author_name,
+            transcript,
+          };
         }
       }
       
@@ -271,14 +269,6 @@ export const fetchTranscript = action({
           title: result.title,
           channelName: result.channelName,
           transcript: result.transcript,
-        };
-      }
-      
-      // If no API key configured, provide helpful error
-      if (!supadataKey) {
-        return { 
-          success: false, 
-          error: "Transcript API not configured. Add SUPADATA_API_KEY to Convex environment variables. Get free key at supadata.ai" 
         };
       }
       

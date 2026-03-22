@@ -36,9 +36,8 @@ export default function TranscriptsPage() {
     setCurrentTranscript(null);
 
     try {
-      // Use local API route which handles youtube-transcript properly
-      const response = await fetch(`/api/transcript?url=${encodeURIComponent(url.trim())}`);
-      const result = await response.json();
+      // Use Convex action which has Supadata API key
+      const result = await fetchTranscript({ url: url.trim() });
       
       if (!result.success) {
         setError(result.error || "Failed to fetch transcript");
