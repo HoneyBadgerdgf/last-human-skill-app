@@ -12,6 +12,7 @@ import type * as ideas from "../ideas.js";
 import type * as newsletters from "../newsletters.js";
 import type * as stats from "../stats.js";
 import type * as swipeItems from "../swipeItems.js";
+import type * as transcripts from "../transcripts.js";
 
 import type {
   ApiFromModules,
@@ -24,6 +25,7 @@ declare const fullApi: ApiFromModules<{
   newsletters: typeof newsletters;
   stats: typeof stats;
   swipeItems: typeof swipeItems;
+  transcripts: typeof transcripts;
 }>;
 
 /**
