@@ -121,7 +121,7 @@ async function fetchViaWebPage(videoId: string): Promise<{ captionUrl: string } 
     }
     
     // Extract ytInitialPlayerResponse
-    const match = html.match(/var ytInitialPlayerResponse\s*=\s*(\{.+?\});/s);
+    const match = html.match(/var ytInitialPlayerResponse\s*=\s*(\{[\s\S]+?\});/);
     if (!match) return null;
     
     // Find the closing brace properly
