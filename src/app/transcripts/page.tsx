@@ -36,7 +36,9 @@ export default function TranscriptsPage() {
     setCurrentTranscript(null);
 
     try {
-      const result = await fetchTranscript({ url: url.trim() });
+      // Use local API route which handles youtube-transcript properly
+      const response = await fetch(`/api/transcript?url=${encodeURIComponent(url.trim())}`);
+      const result = await response.json();
       
       if (!result.success) {
         setError(result.error || "Failed to fetch transcript");

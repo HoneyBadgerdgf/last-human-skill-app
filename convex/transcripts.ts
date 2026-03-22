@@ -16,6 +16,199 @@ function extractVideoId(url: string): string | null {
   return null;
 }
 
+// Decode HTML entities
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
+}
+
+// Parse transcript XML from YouTube
+function parseTranscriptXml(xml: string): string[] {
+  const textParts: string[] = [];
+  
+  // Try new format first: <p t="offset" d="duration">text</p>
+  const pMatches = xml.matchAll(/<p\s+t="\d+"\s+d="\d+"[^>]*>([\s\S]*?)<\/p>/g);
+  for (const match of pMatches) {
+    let text = match[1];
+    // Extract text from <s> tags if present
+    const sMatches = text.matchAll(/<s[^>]*>([^<]*)<\/s>/g);
+    let sText = '';
+    for (const s of sMatches) {
+      sText += s[1];
+    }
+    text = sText || text.replace(/<[^>]+>/g, '');
+    text = decodeEntities(text).trim();
+    if (text) textParts.push(text);
+  }
+  
+  if (textParts.length > 0) return textParts;
+  
+  // Fallback to old format: <text start="x" dur="y">text</text>
+  const textMatches = xml.matchAll(/<text[^>]*>([^<]*)<\/text>/g);
+  for (const match of textMatches) {
+    const text = decodeEntities(match[1]).trim();
+    if (text) textParts.push(text);
+  }
+  
+  return textParts;
+}
+
+// Fetch transcript using YouTube's innertube API (Android client)
+async function fetchViaInnerTube(videoId: string): Promise<{ captionUrl: string } | null> {
+  try {
+    const response = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'com.google.android.youtube/20.10.38 (Linux; U; Android 14)',
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'ANDROID',
+            clientVersion: '20.10.38',
+          },
+        },
+        videoId,
+      }),
+    });
+    
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    const captionTracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    
+    if (!Array.isArray(captionTracks) || captionTracks.length === 0) {
+      return null;
+    }
+    
+    // Get the first available caption track (usually English or auto-generated)
+    const captionUrl = captionTracks[0].baseUrl;
+    if (!captionUrl) return null;
+    
+    return { captionUrl };
+  } catch (error) {
+    console.error('InnerTube fetch failed:', error);
+    return null;
+  }
+}
+
+// Fetch transcript from web page as fallback
+async function fetchViaWebPage(videoId: string): Promise<{ captionUrl: string } | null> {
+  try {
+    const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.83 Safari/537.36,gzip(gfe)',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+    
+    if (!response.ok) return null;
+    
+    const html = await response.text();
+    
+    // Check for captcha
+    if (html.includes('class="g-recaptcha"')) {
+      console.error('YouTube requires captcha');
+      return null;
+    }
+    
+    // Extract ytInitialPlayerResponse
+    const match = html.match(/var ytInitialPlayerResponse\s*=\s*(\{.+?\});/s);
+    if (!match) return null;
+    
+    // Find the closing brace properly
+    let depth = 0;
+    let endIndex = 0;
+    const startIndex = html.indexOf('var ytInitialPlayerResponse = ') + 30;
+    for (let i = startIndex; i < html.length; i++) {
+      if (html[i] === '{') depth++;
+      else if (html[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          endIndex = i + 1;
+          break;
+        }
+      }
+    }
+    
+    if (endIndex === 0) return null;
+    
+    try {
+      const playerResponse = JSON.parse(html.slice(startIndex, endIndex));
+      const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      
+      if (!Array.isArray(captionTracks) || captionTracks.length === 0) {
+        return null;
+      }
+      
+      return { captionUrl: captionTracks[0].baseUrl };
+    } catch {
+      return null;
+    }
+  } catch (error) {
+    console.error('Web page fetch failed:', error);
+    return null;
+  }
+}
+
+// Fetch transcript directly from YouTube
+async function fetchYouTubeTranscript(videoId: string): Promise<{ transcript: string; title: string; channelName?: string } | null> {
+  try {
+    // Try innertube API first (more reliable)
+    let captionData = await fetchViaInnerTube(videoId);
+    
+    // Fallback to web page scraping
+    if (!captionData) {
+      captionData = await fetchViaWebPage(videoId);
+    }
+    
+    if (!captionData) {
+      return null;
+    }
+    
+    // Fetch the actual transcript
+    const captionResponse = await fetch(captionData.captionUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.83 Safari/537.36,gzip(gfe)',
+      },
+    });
+    
+    if (!captionResponse.ok) {
+      return null;
+    }
+    
+    const captionXml = await captionResponse.text();
+    const textParts = parseTranscriptXml(captionXml);
+    
+    if (textParts.length === 0) {
+      return null;
+    }
+    
+    // Get video metadata
+    const metaResponse = await fetch(
+      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+    );
+    const metaData = metaResponse.ok ? await metaResponse.json() : {};
+    
+    return {
+      transcript: textParts.join(' '),
+      title: metaData.title || 'Unknown Title',
+      channelName: metaData.author_name,
+    };
+  } catch (error) {
+    console.error('Failed to fetch YouTube transcript:', error);
+    return null;
+  }
+}
+
 // Action to fetch transcript from YouTube
 export const fetchTranscript = action({
   args: { url: v.string() },
@@ -33,49 +226,65 @@ export const fetchTranscript = action({
     }
 
     try {
-      // Use supadata.ai free transcript API
-      const response = await fetch(
-        `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&text=true`,
-        {
-          headers: {
-            "Accept": "application/json",
-          },
-        }
-      );
-
-      if (!response.ok) {
-        // Fallback to youtubetotranscript.com API
-        const fallbackResponse = await fetch(
-          `https://youtubetotranscript.com/api/transcript?videoId=${videoId}`
-        );
-        
-        if (!fallbackResponse.ok) {
-          return { success: false, error: "Could not fetch transcript. Video may not have captions." };
-        }
-        
-        const fallbackData = await fallbackResponse.json();
-        return {
-          success: true,
-          videoId,
-          title: fallbackData.title || "Unknown Title",
-          transcript: fallbackData.transcript || fallbackData.text || "",
-        };
-      }
-
-      const data = await response.json();
-      
-      // Get video metadata
+      // Get video metadata first
       const metaResponse = await fetch(
         `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
       );
       const metaData = metaResponse.ok ? await metaResponse.json() : {};
-
-      return {
-        success: true,
-        videoId,
-        title: metaData.title || "Unknown Title",
-        channelName: metaData.author_name,
-        transcript: typeof data === "string" ? data : (data.transcript || data.text || JSON.stringify(data)),
+      
+      // Try supadata.ai API (requires API key in env)
+      const supadataKey = process.env.SUPADATA_API_KEY;
+      if (supadataKey) {
+        const supadataResponse = await fetch(
+          `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&text=true`,
+          {
+            headers: {
+              'x-api-key': supadataKey,
+              'Accept': 'application/json',
+            },
+          }
+        );
+        
+        if (supadataResponse.ok) {
+          const data = await supadataResponse.json();
+          const transcript = typeof data === 'string' ? data : (data.content || data.transcript || data.text || '');
+          
+          if (transcript) {
+            return {
+              success: true,
+              videoId,
+              title: metaData.title || 'Unknown Title',
+              channelName: metaData.author_name,
+              transcript,
+            };
+          }
+        }
+      }
+      
+      // Try direct YouTube transcript extraction
+      const result = await fetchYouTubeTranscript(videoId);
+      
+      if (result) {
+        return {
+          success: true,
+          videoId,
+          title: result.title,
+          channelName: result.channelName,
+          transcript: result.transcript,
+        };
+      }
+      
+      // If no API key configured, provide helpful error
+      if (!supadataKey) {
+        return { 
+          success: false, 
+          error: "Transcript API not configured. Add SUPADATA_API_KEY to Convex environment variables. Get free key at supadata.ai" 
+        };
+      }
+      
+      return { 
+        success: false, 
+        error: "Could not fetch transcript. Video may not have captions enabled." 
       };
     } catch (error) {
       return { 
